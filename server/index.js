@@ -1,5 +1,8 @@
 require("dotenv").config();
 
+// Add this import for GoogleGenerativeAI
+const { GoogleGenerativeAI } = require("@google/generative-ai");
+
 const express = require("express");
 const path = require("path");
 const http = require("http");
@@ -7,12 +10,12 @@ const { Server } = require("socket.io");
 const cors = require("cors");
 const mongoose = require("mongoose");
 const Conversation = require("./models/Conversation");
-
-// --- AI Observer dependencies ---
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const Template = require("./models/Template");
+const Room = require("./models/Room"); // <-- Add this import
 
 const app = express();
 app.use(cors());
+app.use(express.json()); // Needed for POST body parsing
 
 // Serve static files from the React app
 app.use(express.static(path.join(__dirname, "../client/build")));
@@ -188,6 +191,64 @@ io.on("connection", (socket) => {
     delete socketRoomMap[socket.id];
     console.log(`Socket ${socket.id} disconnected from room ${roomId}`);
   });
+});
+
+// API to create a room with a template
+app.post("/api/create-room", async (req, res) => {
+  const { roomId, roomName, templateName } = req.body;
+  if (!roomId || !roomName) {
+    return res.status(400).json({ error: "roomId and roomName required" });
+  }
+  // Always use provided templateName or fallback to "General"
+  let template =
+    (templateName && (await Template.findOne({ name: templateName }))) ||
+    (await Template.findOne({ name: "General" }));
+
+  // Create or update Room
+  let room = await Room.findOne({ roomId });
+  if (!room) {
+    room = new Room({
+      roomId,
+      name: roomName,
+      template: template ? template._id : null,
+    });
+    await room.save();
+  } else {
+    // Always update template if not set or if a new template is chosen
+    if (
+      (!room.template && template) ||
+      (template && !room.template?.equals(template._id))
+    ) {
+      room.template = template ? template._id : null;
+      await room.save();
+    }
+  }
+
+  // Create conversation if not exists, and associate with Room and Template
+  let conversation = await Conversation.findOne({ roomId });
+  if (!conversation) {
+    conversation = new Conversation({
+      roomId,
+      name: roomName,
+      messages: [],
+      room: room._id,
+      template: template ? template._id : null,
+    });
+    await conversation.save();
+  } else {
+    // Optionally update room/template ref if needed
+    let changed = false;
+    if (!conversation.room) {
+      conversation.room = room._id;
+      changed = true;
+    }
+    if (!conversation.template && template) {
+      conversation.template = template._id;
+      changed = true;
+    }
+    if (changed) await conversation.save();
+  }
+  res.json({ success: true, roomId, template: template?.name });
 });
 
 // Add this catch-all route after your API routes
