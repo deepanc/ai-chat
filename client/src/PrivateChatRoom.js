@@ -5,12 +5,11 @@ import {
   Typography,
   IconButton,
   Snackbar,
-  Avatar,
 } from "@mui/material";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import { useParams } from "react-router-dom";
 
-function ChatRoom() {
+function PrivateChatRoom() {
   const { roomId } = useParams();
   const magicLink = `${window.location.origin}/room/${roomId}`;
   const [copied, setCopied] = useState(false);
@@ -72,4 +71,4 @@ function ChatRoom() {
   );
 }
 
-export default ChatRoom;
+export default PrivateChatRoom;

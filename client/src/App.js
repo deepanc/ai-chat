@@ -1,3 +1,4 @@
+// App.js
 import React, { useState } from "react";
 import {
   AppBar,
@@ -13,14 +14,12 @@ import {
   Avatar,
   TextField,
   Alert,
-  IconButton,
-  Snackbar,
 } from "@mui/material";
 import ChatBubbleOutlineIcon from "@mui/icons-material/ChatBubbleOutline";
 import CampaignIcon from "@mui/icons-material/Campaign";
 import LightbulbIcon from "@mui/icons-material/Lightbulb";
-import ContentCopyIcon from "@mui/icons-material/ContentCopy";
-import { BrowserRouter, Routes, Route, useNavigate } from "react-router-dom";
+import { Routes, Route, useNavigate } from "react-router-dom";
+import PrivateChatRoom from "./PrivateChatRoom";
 
 const templates = [
   {
@@ -92,7 +91,7 @@ function TemplateCard({ icon, title, selected, onClick }) {
   );
 }
 
-export default function App() {
+function Home() {
   const [roomName, setRoomName] = useState("");
   const [error, setError] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState("General");
@@ -244,3 +243,21 @@ export default function App() {
     </Box>
   );
 }
+
+function App() {
+  return (
+    <Routes>
+      <Route
+        path="/"
+        element={
+          <Box sx={{ bgcolor: "#fff", minHeight: "100vh" }}>
+            <Home />
+          </Box>
+        }
+      />
+      <Route path="/room/:roomId" element={<PrivateChatRoom />} />
+    </Routes>
+  );
+}
+
+export default App;
