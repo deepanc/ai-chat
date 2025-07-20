@@ -18,7 +18,7 @@ import {
 import ChatBubbleOutlineIcon from "@mui/icons-material/ChatBubbleOutline";
 import CampaignIcon from "@mui/icons-material/Campaign";
 import LightbulbIcon from "@mui/icons-material/Lightbulb";
-import { Routes, Route, useNavigate } from "react-router-dom";
+import { Routes, Route, useNavigate, useLocation } from "react-router-dom";
 import PrivateChatRoom from "./PrivateChatRoom";
 
 const templates = [
@@ -93,9 +93,42 @@ function TemplateCard({ icon, title, selected, onClick }) {
 
 function Home() {
   const [roomName, setRoomName] = useState("");
+  const [username, setUsername] = useState("");
   const [error, setError] = useState("");
   const [selectedTemplate, setSelectedTemplate] = useState("General");
+  const [existingRoom, setExistingRoom] = useState(null);
+  const [existingUsers, setExistingUsers] = useState([]);
+  const [showUserSelect, setShowUserSelect] = useState(false);
   const navigate = useNavigate();
+
+  const slugify = (name) =>
+    encodeURIComponent(name.trim().replace(/\s+/g, "-").toLowerCase());
+
+  const handleRoomNameBlur = async () => {
+    setError("");
+    setExistingRoom(null);
+    setExistingUsers([]);
+    setShowUserSelect(false);
+    const slug = slugify(roomName);
+    if (!slug) return;
+    const res = await fetch(
+      `/api/room-by-name?roomName=${encodeURIComponent(roomName)}`
+    );
+    if (res.ok) {
+      const data = await res.json();
+      if (data.exists && data.roomId && data.magicLink) {
+        setExistingRoom({ roomId: data.roomId, magicLink: data.magicLink });
+        // Always fetch users from DB for this room
+        const usersRes = await fetch(
+          `/api/room-users?roomId=${encodeURIComponent(data.roomId)}`
+        );
+        if (usersRes.ok) {
+          const usersData = await usersRes.json();
+          setExistingUsers(usersData.users || []);
+        }
+      }
+    }
+  };
 
   const handleCreateRoom = async (e) => {
     e.preventDefault();
@@ -103,10 +136,37 @@ function Home() {
       setError("Room name is required.");
       return;
     }
+    if (!username.trim()) {
+      setError("Username is required.");
+      return;
+    }
     setError("");
-    const slug = encodeURIComponent(
-      roomName.trim().replace(/\s+/g, "-").toLowerCase()
-    );
+    if (existingRoom) {
+      // Always join, even if user already exists, to ensure user is in DB
+      await fetch("/api/join", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomId: existingRoom.roomId,
+          username,
+        }),
+      });
+      // Fetch updated users list after join
+      const usersRes = await fetch(
+        `/api/room-users?roomId=${encodeURIComponent(existingRoom.roomId)}`
+      );
+      let usersList = [];
+      if (usersRes.ok) {
+        const usersData = await usersRes.json();
+        usersList = usersData.users || [];
+      }
+      // Navigate and pass all users for this room (including current user)
+      navigate(`/room/${existingRoom.roomId}`, {
+        state: { username, users: usersList },
+      });
+      return;
+    }
+    const slug = slugify(roomName);
     const id = Math.random().toString(36).slice(2, 10);
     const roomId = `${slug}-${id}`;
     await fetch("/api/create-room", {
@@ -116,9 +176,45 @@ function Home() {
         roomId,
         roomName,
         templateName: selectedTemplate,
+        username,
       }),
     });
-    navigate(`/room/${roomId}`);
+    // After creating, fetch users (should include the creator)
+    const usersRes = await fetch(
+      `/api/room-users?roomId=${encodeURIComponent(roomId)}`
+    );
+    let usersList = [];
+    if (usersRes.ok) {
+      const usersData = await usersRes.json();
+      usersList = usersData.users || [];
+    }
+    navigate(`/room/${roomId}`, { state: { username, users: usersList } });
+  };
+
+  const handleSelectExistingUser = async (selectedUsername) => {
+    setUsername(selectedUsername);
+    setShowUserSelect(false);
+    // Always join to ensure user is in DB
+    await fetch("/api/join", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        roomId: existingRoom.roomId,
+        username: selectedUsername,
+      }),
+    });
+    // Fetch updated users list after join
+    const usersRes = await fetch(
+      `/api/room-users?roomId=${encodeURIComponent(existingRoom.roomId)}`
+    );
+    let usersList = [];
+    if (usersRes.ok) {
+      const usersData = await usersRes.json();
+      usersList = usersData.users || [];
+    }
+    navigate(`/room/${existingRoom.roomId}`, {
+      state: { username: selectedUsername, users: usersList },
+    });
   };
 
   return (
@@ -152,7 +248,6 @@ function Home() {
             fontSize: "0.95rem",
           }}
         >
-          {/* App description */}
           <Typography variant="h5" fontWeight="bold" mb={1}>
             Welcome to ChatterBox
           </Typography>
@@ -183,9 +278,27 @@ function Home() {
                 label="Room name"
                 variant="outlined"
                 value={roomName}
-                onChange={(e) => setRoomName(e.target.value)}
+                onChange={(e) => {
+                  setRoomName(e.target.value);
+                  setExistingRoom(null);
+                  setExistingUsers([]);
+                  setShowUserSelect(false);
+                }}
+                onBlur={handleRoomNameBlur}
                 sx={{
-                  width: 280,
+                  width: 200,
+                  fontSize: "0.95rem",
+                }}
+                InputProps={{ style: { fontSize: "0.95rem" } }}
+                InputLabelProps={{ style: { fontSize: "0.95rem" } }}
+              />
+              <TextField
+                label="Your name"
+                variant="outlined"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                sx={{
+                  width: 160,
                   fontSize: "0.95rem",
                 }}
                 InputProps={{ style: { fontSize: "0.95rem" } }}
@@ -202,8 +315,9 @@ function Home() {
                   minWidth: 120,
                 }}
                 type="submit"
+                disabled={!existingRoom && showUserSelect}
               >
-                Create Room
+                {existingRoom ? "Enter room" : "Create Room"}
               </Button>
             </Box>
             {error && (
@@ -244,6 +358,70 @@ function Home() {
   );
 }
 
+function RoomWrapper() {
+  const location = useLocation();
+  const [username, setUsername] = useState(location.state?.username || "");
+  // Use users from navigation state if available, else fetch from DB
+  const [roomUsers, setRoomUsers] = useState(location.state?.users || []);
+
+  React.useEffect(() => {
+    if (!username) {
+      const name = window.prompt("Enter your name to join the room:");
+      if (name) setUsername(name);
+    }
+  }, [username]);
+
+  const roomId = window.location.pathname.split("/room/")[1];
+
+  // Always fetch users from DB for this room, regardless of navigation state
+  React.useEffect(() => {
+    if (roomId) {
+      fetch(`/api/room-users?roomId=${encodeURIComponent(roomId)}`)
+        .then((res) => res.json())
+        .then((data) => setRoomUsers(data.users || []));
+    }
+  }, [roomId]);
+
+  // If username is not in the users list, add it (for display only, not DB)
+  const allUsers = React.useMemo(() => {
+    if (!username) return roomUsers;
+    const exists = roomUsers.some((u) => u.username === username);
+    if (exists) return roomUsers;
+    return [...roomUsers, { username }];
+  }, [roomUsers, username]);
+
+  if (!username) return null;
+
+  return (
+    <Box>
+      <Box sx={{ mb: 2 }}>
+        <Typography variant="subtitle2" sx={{ mb: 1 }}>
+          Users in this room:
+        </Typography>
+        <Grid container spacing={1}>
+          {allUsers.map((u) => (
+            <Grid item key={u.username}>
+              <Avatar
+                sx={{
+                  width: 28,
+                  height: 28,
+                  bgcolor: "#e3f2fd",
+                  color: "#1976d2",
+                  fontSize: 16,
+                }}
+              >
+                {u.username[0]?.toUpperCase()}
+              </Avatar>
+              <Typography variant="caption">{u.username}</Typography>
+            </Grid>
+          ))}
+        </Grid>
+      </Box>
+      <PrivateChatRoom username={username} />
+    </Box>
+  );
+}
+
 function App() {
   return (
     <Routes>
@@ -255,7 +433,7 @@ function App() {
           </Box>
         }
       />
-      <Route path="/room/:roomId" element={<PrivateChatRoom />} />
+      <Route path="/room/:roomId" element={<RoomWrapper />} />
     </Routes>
   );
 }

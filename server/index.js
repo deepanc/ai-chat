@@ -42,11 +42,11 @@ const io = new Server(server, {
 
 // In-memory rooms object (cleared on server restart)
 const rooms = {};
-// Track which room each socket is in
 const socketRoomMap = {};
 let userIdCounter = 1;
 const users = {}; // socket.id -> { userId, username, roomId }
 const messagesByRoom = {}; // roomId -> [ { userId, username, roomId, text } ]
+const usersByRoom = {}; // roomId -> [ { userId, username } ]
 
 // --- AI Observer Setup ---
 const AI_OBSERVER_NAME = "AI Observer";
@@ -127,6 +127,22 @@ io.on("connection", (socket) => {
     socketRoomMap[socket.id] = roomId;
     socket.join(roomId);
 
+    // Track user in usersByRoom
+    usersByRoom[roomId] = usersByRoom[roomId] || [];
+    // Prevent duplicates
+    if (!usersByRoom[roomId].some((u) => u.userId === userId)) {
+      usersByRoom[roomId].push({ userId, username });
+    }
+
+    // Add username to Room.users array in DB if not present
+    if (roomId && username) {
+      const room = await Room.findOne({ roomId });
+      if (room && !room.users.includes(username)) {
+        room.users.push(username);
+        await room.save();
+      }
+    }
+
     // Load messages from DB if not in memory
     if (!messagesByRoom[roomId]) {
       // Try to load from MongoDB
@@ -148,6 +164,7 @@ io.on("connection", (socket) => {
       messages: messagesByRoom[roomId],
       userId,
       username,
+      users: usersByRoom[roomId], // send current users in room
     });
   });
 
@@ -183,6 +200,15 @@ io.on("connection", (socket) => {
       }));
       await conversation.save();
     }
+
+    // Remove user from usersByRoom
+    if (roomId && usersByRoom[roomId]) {
+      usersByRoom[roomId] = usersByRoom[roomId].filter(
+        (u) => u.userId !== (user && user.userId)
+      );
+      if (usersByRoom[roomId].length === 0) delete usersByRoom[roomId];
+    }
+
     delete users[socket.id];
     if (roomId && rooms[roomId]) {
       rooms[roomId] = rooms[roomId].filter((id) => id !== socket.id);
@@ -195,7 +221,7 @@ io.on("connection", (socket) => {
 
 // API to create a room with a template
 app.post("/api/create-room", async (req, res) => {
-  const { roomId, roomName, templateName } = req.body;
+  const { roomId, roomName, templateName, username } = req.body;
   if (!roomId || !roomName) {
     return res.status(400).json({ error: "roomId and roomName required" });
   }
@@ -204,6 +230,11 @@ app.post("/api/create-room", async (req, res) => {
     (templateName && (await Template.findOne({ name: templateName }))) ||
     (await Template.findOne({ name: "General" }));
 
+  // Generate magic link
+  const magicLink = `${
+    process.env.PUBLIC_URL || "http://localhost:3000"
+  }/room/${roomId}`;
+
   // Create or update Room
   let room = await Room.findOne({ roomId });
   if (!room) {
@@ -211,17 +242,31 @@ app.post("/api/create-room", async (req, res) => {
       roomId,
       name: roomName,
       template: template ? template._id : null,
+      magicLink, // store magic link
+      users: username ? [username] : [], // <-- Add creator to users array
     });
     await room.save();
   } else {
     // Always update template if not set or if a new template is chosen
+    let changed = false;
     if (
       (!room.template && template) ||
       (template && !room.template?.equals(template._id))
     ) {
       room.template = template ? template._id : null;
-      await room.save();
+      changed = true;
     }
+    // Set magicLink if not present
+    if (!room.magicLink) {
+      room.magicLink = magicLink;
+      changed = true;
+    }
+    // Add username to users array if not present
+    if (username && !room.users.includes(username)) {
+      room.users.push(username);
+      changed = true;
+    }
+    if (changed) await room.save();
   }
 
   // Create conversation if not exists, and associate with Room and Template
@@ -248,7 +293,87 @@ app.post("/api/create-room", async (req, res) => {
     }
     if (changed) await conversation.save();
   }
-  res.json({ success: true, roomId, template: template?.name });
+
+  // Optionally, add creator as first user in usersByRoom
+  if (username) {
+    usersByRoom[roomId] = usersByRoom[roomId] || [];
+    if (!usersByRoom[roomId].some((u) => u.username === username)) {
+      // Use userId 1 for creator (or you can generate a new one)
+      usersByRoom[roomId].push({ userId: 1, username });
+    }
+  }
+
+  res.json({
+    success: true,
+    roomId,
+    template: template?.name,
+    magicLink: room.magicLink,
+    users: usersByRoom[roomId] || [],
+  });
+});
+
+// API to get users in a room
+app.get("/api/room-users", async (req, res) => {
+  const { roomId } = req.query;
+  if (!roomId) return res.status(400).json({ error: "roomId required" });
+
+  // Always fetch from DB for source of truth
+  const room = await Room.findOne({ roomId });
+  let users = [];
+  if (room && Array.isArray(room.users)) {
+    // Return as array of { username }
+    users = room.users.map((username) => ({ username }));
+    // Optionally, sync in-memory usersByRoom for consistency
+    usersByRoom[roomId] = users.map((u, idx) => ({
+      userId: idx + 1,
+      username: u.username,
+    }));
+    // Return with userId for frontend compatibility
+    users = usersByRoom[roomId];
+  } else {
+    users = usersByRoom[roomId] || [];
+  }
+  res.json({ users });
+});
+
+// Add this API endpoint before the catch-all route
+app.get("/api/room-by-name", async (req, res) => {
+  const { roomName } = req.query;
+  if (!roomName) return res.status(400).json({ error: "roomName required" });
+  const room = await Room.findOne({ name: roomName });
+  if (room) {
+    return res.json({
+      exists: true,
+      roomId: room.roomId,
+      magicLink: room.magicLink,
+    });
+  }
+  res.json({ exists: false });
+});
+
+// --- ADD: API to join a room (add user to room.users and usersByRoom) ---
+app.post("/api/join", async (req, res) => {
+  const { roomId, username } = req.body;
+  if (!roomId || !username) {
+    return res.status(400).json({ error: "roomId and username required" });
+  }
+  // Add username to Room.users array in DB if not present
+  const room = await Room.findOne({ roomId });
+  if (room && !room.users.includes(username)) {
+    room.users.push(username);
+    await room.save();
+  }
+  // Add to in-memory usersByRoom (if not present)
+  usersByRoom[roomId] = usersByRoom[roomId] || [];
+  if (!usersByRoom[roomId].some((u) => u.username === username)) {
+    // Assign a new userId (find max userId in room and add 1)
+    const maxUserId =
+      usersByRoom[roomId].length > 0
+        ? Math.max(...usersByRoom[roomId].map((u) => u.userId || 1))
+        : 1;
+    usersByRoom[roomId].push({ userId: maxUserId + 1, username });
+  }
+  res.json({ success: true });
 });
 
 // Add this catch-all route after your API routes
