@@ -360,65 +360,17 @@ function Home() {
 
 function RoomWrapper() {
   const location = useLocation();
-  const [username, setUsername] = useState(location.state?.username || "");
-  // Use users from navigation state if available, else fetch from DB
-  const [roomUsers, setRoomUsers] = useState(location.state?.users || []);
-
-  React.useEffect(() => {
-    if (!username) {
-      const name = window.prompt("Enter your name to join the room:");
-      if (name) setUsername(name);
-    }
-  }, [username]);
-
   const roomId = window.location.pathname.split("/room/")[1];
-
-  // Always fetch users from DB for this room, regardless of navigation state
-  React.useEffect(() => {
-    if (roomId) {
-      fetch(`/api/room-users?roomId=${encodeURIComponent(roomId)}`)
-        .then((res) => res.json())
-        .then((data) => setRoomUsers(data.users || []));
-    }
-  }, [roomId]);
-
-  // If username is not in the users list, add it (for display only, not DB)
-  const allUsers = React.useMemo(() => {
-    if (!username) return roomUsers;
-    const exists = roomUsers.some((u) => u.username === username);
-    if (exists) return roomUsers;
-    return [...roomUsers, { username }];
-  }, [roomUsers, username]);
-
-  if (!username) return null;
-
-  return (
-    <Box>
-      <Box sx={{ mb: 2 }}>
-        <Typography variant="subtitle2" sx={{ mb: 1 }}>
-          Users in this room:
-        </Typography>
-        <Grid container spacing={1}>
-          {allUsers.map((u) => (
-            <Grid item key={u.username}>
-              <Avatar
-                sx={{
-                  width: 28,
-                  height: 28,
-                  bgcolor: "#e3f2fd",
-                  color: "#1976d2",
-                  fontSize: 16,
-                }}
-              >
-                {u.username[0]?.toUpperCase()}
-              </Avatar>
-              <Typography variant="caption">{u.username}</Typography>
-            </Grid>
-          ))}
-        </Grid>
-      </Box>
-      <PrivateChatRoom username={username} />
-    </Box>
+  let username = location.state?.username || null;
+  if (!username && roomId) {
+    const storageKey = `username:${roomId}`;
+    username = window.localStorage.getItem(storageKey) || null;
+  }
+  // Only pass username prop if available, else let PrivateChatRoom handle join UI
+  return username ? (
+    <PrivateChatRoom username={username} />
+  ) : (
+    <PrivateChatRoom />
   );
 }
 

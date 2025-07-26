@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { io } from "socket.io-client";
 import {
   Container,
   Box,
@@ -21,7 +22,7 @@ import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import SendIcon from "@mui/icons-material/Send";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 
-function PrivateChatRoom() {
+function PrivateChatRoom({ username: usernameProp }) {
   const { roomId } = useParams();
   const magicLink = `${window.location.origin}/room/${roomId}`;
   const [copied, setCopied] = useState(false);
@@ -31,23 +32,26 @@ function PrivateChatRoom() {
   // --- Username join logic ---
   // Use localStorage to persist username per room
   const storageKey = `username:${roomId}`;
-  // Try to get username from localStorage, or from navigation state (for creator)
-  const [username, setUsername] = useState(() => {
-    return (
-      localStorage.getItem(storageKey) ||
-      (location.state && location.state.username) ||
-      ""
-    );
-  });
+  // Only use usernameProp or localStorage, never location.state (prevents cross-session leakage)
+  const initialUsername = (() => {
+    if (usernameProp) {
+      if (typeof window !== "undefined" && roomId) {
+        const existing = localStorage.getItem(storageKey);
+        if (!existing) localStorage.setItem(storageKey, usernameProp);
+      }
+      return usernameProp;
+    }
+    return localStorage.getItem(storageKey) || "";
+  })();
+  const [username, setUsername] = useState(initialUsername);
   const [joinInput, setJoinInput] = useState("");
   const [joining, setJoining] = useState(false);
 
   // Users in the room (only creator by default)
   const [users, setUsers] = useState([]);
-  const [messages, setMessages] = useState([
-    { userId: "system", text: "Welcome to your private chat room!" },
-  ]);
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
+  const socketRef = useRef(null);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(magicLink);
@@ -56,11 +60,33 @@ function PrivateChatRoom() {
 
   const handleSend = (e) => {
     e.preventDefault();
-    if (input.trim()) {
-      setMessages((msgs) => [...msgs, { userId: "u1", text: input.trim() }]);
-      setInput("");
+    if (!input.trim() || !username) return;
+    if (socketRef.current) {
+      socketRef.current.emit("chat-message", {
+        roomId,
+        text: input.trim(),
+      });
     }
+    setInput("");
   };
+
+  // Setup socket.io connection
+  useEffect(() => {
+    if (!roomId || !username) return;
+    const socket = io({ path: "/socket.io" });
+    socketRef.current = socket;
+    socket.emit("join-room", { roomId, username }, (data) => {
+      if (data && data.success && Array.isArray(data.messages)) {
+        setMessages(data.messages);
+      }
+    });
+    socket.on("chat-message", (msg) => {
+      setMessages((prev) => [...prev, msg]);
+    });
+    return () => {
+      socket.disconnect();
+    };
+  }, [roomId, username]);
 
   // Fetch users in room (only after username is set)
   useEffect(() => {
@@ -254,7 +280,7 @@ function PrivateChatRoom() {
               >
                 <List sx={{ flex: 1, overflowY: "auto" }}>
                   {messages.map((msg, idx) => {
-                    const isYou = msg.userId === "u1";
+                    const isYou = msg.username === username;
                     const isSystem = msg.userId === "system";
                     return (
                       <ListItem
@@ -271,7 +297,7 @@ function PrivateChatRoom() {
                         <ListItemText
                           primary={msg.text}
                           secondary={
-                            !isSystem ? getUserName(msg.userId) : undefined
+                            !isSystem ? msg.username || "Unknown" : undefined
                           }
                           sx={{
                             bgcolor: isSystem

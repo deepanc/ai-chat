@@ -176,6 +176,7 @@ io.on("connection", (socket) => {
       username: user.username,
       roomId: msg.roomId,
       text: msg.text,
+      timestamp: new Date(),
     };
     messagesByRoom[msg.roomId] = messagesByRoom[msg.roomId] || [];
     messagesByRoom[msg.roomId].push(message);
