@@ -20,6 +20,10 @@ app.use(express.json()); // Needed for POST body parsing
 // Serve static files from the React app
 app.use(express.static(path.join(__dirname, "../client/build")));
 
+// Mount conversation routes (for /api/room-messages and others)
+const conversationRoutes = require("./routes/conversation");
+app.use("/api", conversationRoutes);
+
 // Health check endpoint
 app.get("/health", (req, res) => res.send("OK"));
 
@@ -119,7 +123,8 @@ if (genAI) {
 io.on("connection", (socket) => {
   socket.on("join-room", async ({ roomId, username }, callback) => {
     if (!roomId || !username) {
-      callback({ success: false, error: "Missing roomId or username" });
+      if (typeof callback === "function")
+        callback({ success: false, error: "Missing roomId or username" });
       return;
     }
     const userId = userIdCounter++;
@@ -159,13 +164,17 @@ io.on("connection", (socket) => {
       }
     }
 
-    callback({
-      success: true,
-      messages: messagesByRoom[roomId],
-      userId,
-      username,
-      users: usersByRoom[roomId], // send current users in room
-    });
+    if (typeof callback === "function") {
+      callback({
+        success: true,
+        messages: messagesByRoom[roomId],
+        userId,
+        username,
+        users: usersByRoom[roomId], // send current users in room
+      });
+    }
+    // Always emit current users to all in room
+    io.to(roomId).emit("room-users", usersByRoom[roomId]);
   });
 
   socket.on("chat-message", (msg) => {
@@ -181,6 +190,48 @@ io.on("connection", (socket) => {
     messagesByRoom[msg.roomId] = messagesByRoom[msg.roomId] || [];
     messagesByRoom[msg.roomId].push(message);
     io.to(msg.roomId).emit("chat-message", message);
+
+    // Explicit AI invocation: if message starts with @AI (case-insensitive)
+    if (
+      typeof msg.text === "string" &&
+      msg.text.trim().toLowerCase().startsWith("@ai")
+    ) {
+      // Use the same logic as aiObserverTick, but only for this room
+      (async () => {
+        if (!genAI) return;
+        const messages = messagesByRoom[msg.roomId] || [];
+        // Don't reply if last message was from AI
+        const lastMsg = messages[messages.length - 1];
+        if (lastMsg && lastMsg.userId === AI_OBSERVER_USERID) return;
+        try {
+          const prompt = buildPrompt(messages, msg.roomId);
+          const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+          const result = await model.generateContent(prompt);
+          const aiText =
+            result?.response?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+            "";
+          if (
+            aiText &&
+            !aiText.startsWith("[NO_REPLY]") &&
+            aiText.length < 500
+          ) {
+            const aiMsg = {
+              userId: AI_OBSERVER_USERID,
+              username: AI_OBSERVER_NAME,
+              roomId: msg.roomId,
+              text: aiText,
+            };
+            messagesByRoom[msg.roomId].push(aiMsg);
+            io.to(msg.roomId).emit("chat-message", aiMsg);
+          }
+        } catch (err) {
+          console.error(
+            `Explicit AI error in room ${msg.roomId}:`,
+            err.message || err
+          );
+        }
+      })();
+    }
   });
 
   socket.on("disconnect", async () => {

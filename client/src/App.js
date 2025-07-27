@@ -20,6 +20,7 @@ import CampaignIcon from "@mui/icons-material/Campaign";
 import LightbulbIcon from "@mui/icons-material/Lightbulb";
 import { Routes, Route, useNavigate, useLocation } from "react-router-dom";
 import PrivateChatRoom from "./PrivateChatRoom";
+import { fetchRoomMessages } from "./api/messages";
 
 const templates = [
   {
@@ -160,9 +161,13 @@ function Home() {
         const usersData = await usersRes.json();
         usersList = usersData.users || [];
       }
-      // Navigate and pass all users for this room (including current user)
+      // Fetch messages for this room
+      const messagesList = await fetchRoomMessages(existingRoom.roomId);
+      // Store username in localStorage for this room
+      localStorage.setItem(`chat-username-${existingRoom.roomId}`, username);
+      // Navigate and pass all users and messages for this room (including current user)
       navigate(`/room/${existingRoom.roomId}`, {
-        state: { username, users: usersList },
+        state: { username, users: usersList, messages: messagesList },
       });
       return;
     }
@@ -188,7 +193,13 @@ function Home() {
       const usersData = await usersRes.json();
       usersList = usersData.users || [];
     }
-    navigate(`/room/${roomId}`, { state: { username, users: usersList } });
+    // Fetch messages for this room
+    const messagesList = await fetchRoomMessages(roomId);
+    // Store username in localStorage for this room
+    localStorage.setItem(`chat-username-${roomId}`, username);
+    navigate(`/room/${roomId}`, {
+      state: { username, users: usersList, messages: messagesList },
+    });
   };
 
   const handleSelectExistingUser = async (selectedUsername) => {
@@ -212,8 +223,19 @@ function Home() {
       const usersData = await usersRes.json();
       usersList = usersData.users || [];
     }
+    // Fetch messages for this room
+    const messagesList = await fetchRoomMessages(existingRoom.roomId);
+    // Store username in localStorage for this room
+    localStorage.setItem(
+      `chat-username-${existingRoom.roomId}`,
+      selectedUsername
+    );
     navigate(`/room/${existingRoom.roomId}`, {
-      state: { username: selectedUsername, users: usersList },
+      state: {
+        username: selectedUsername,
+        users: usersList,
+        messages: messagesList,
+      },
     });
   };
 
@@ -362,16 +384,28 @@ function RoomWrapper() {
   const location = useLocation();
   const roomId = window.location.pathname.split("/room/")[1];
   let username = location.state?.username || null;
+  let users = location.state?.users || null;
+  let messages = location.state?.messages || null;
   if (!username && roomId) {
-    const storageKey = `username:${roomId}`;
-    username = window.localStorage.getItem(storageKey) || null;
+    // Try both key formats for backward compatibility
+    username =
+      window.localStorage.getItem(`chat-username-${roomId}`) ||
+      window.localStorage.getItem(`username:${roomId}`) ||
+      null;
   }
-  // Only pass username prop if available, else let PrivateChatRoom handle join UI
-  return username ? (
-    <PrivateChatRoom username={username} />
-  ) : (
-    <PrivateChatRoom />
-  );
+  // Always pass roomId as prop
+  if (username) {
+    return (
+      <PrivateChatRoom
+        roomId={roomId}
+        username={username}
+        users={users}
+        messages={messages}
+      />
+    );
+  } else {
+    return <PrivateChatRoom roomId={roomId} />;
+  }
 }
 
 function App() {
