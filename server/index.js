@@ -42,7 +42,7 @@ app.get("/health", (req, res) => res.send("OK"));
 
 // Connect to MongoDB
 mongoose
-  .connect("mongodb://127.0.0.1:27017/ai-chat", {
+  .connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
   })
