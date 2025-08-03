@@ -1,3 +1,4 @@
+const API_URL = process.env.REACT_APP_API_URL || "";
 import React, { useState } from "react";
 
 function CreateRoom({ onRoomCreated }) {
@@ -8,7 +9,7 @@ function CreateRoom({ onRoomCreated }) {
 
   const handleCreateRoom = async (e) => {
     e.preventDefault();
-    const res = await fetch("/api/create-room", {
+    const res = await fetch(`${API_URL}/api/create-room`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
