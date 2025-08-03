@@ -1,91 +1,115 @@
-import React, { useEffect, useState } from "react";
-import io from "socket.io-client";
-
-const socket = io(); // or your server URL
+import React, { useState } from "react";
+import {
+  Container,
+  Box,
+  Typography,
+  IconButton,
+  Snackbar,
+  Avatar,
+  AppBar,
+  Toolbar,
+  Button,
+} from "@mui/material";
+import ContentCopyIcon from "@mui/icons-material/ContentCopy";
+import { useParams, useNavigate } from "react-router-dom";
 
 function ChatRoom() {
-  const [roomId, setRoomId] = useState("");
-  const [username, setUsername] = useState("");
-  const [userId, setUserId] = useState(""); // Added userId state
-  const [joined, setJoined] = useState(false);
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
+  const { roomId } = useParams();
+  const magicLink = `${window.location.origin}/room/${roomId}`;
+  const [copied, setCopied] = useState(false);
+  const navigate = useNavigate();
 
-  useEffect(() => {
-    if (!joined) return;
-
-    socket.emit("join-room", { roomId, username }, (response) => {
-      if (response.success) {
-        setMessages(response.messages || []);
-        setUserId(response.userId); // Set userId from response
-      }
-    });
-
-    socket.on("chat-message", (message) => {
-      setMessages((prev) => [...prev, message]);
-    });
-
-    return () => {
-      socket.off("chat-message");
-    };
-  }, [joined, roomId, username]);
-
-  const handleJoin = (e) => {
-    e.preventDefault();
-    if (roomId && username) setJoined(true);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(magicLink);
+    setCopied(true);
   };
-
-  const handleSend = (e) => {
-    e.preventDefault();
-    if (input.trim()) {
-      socket.emit("chat-message", {
-        roomId,
-        username,
-        userId, // Include userId in the message
-        text: input,
-      });
-      setInput("");
-    }
-  };
-
-  if (!joined) {
-    return (
-      <form className="join-form" onSubmit={handleJoin}>
-        <input
-          placeholder="Room ID"
-          value={roomId}
-          onChange={(e) => setRoomId(e.target.value)}
-          required
-        />
-        <input
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          required
-        />
-        <button type="submit">Join</button>
-      </form>
-    );
-  }
 
   return (
-    <div className="chat-room">
-      <div className="messages-list">
-        {messages.map((msg, idx) => (
-          <div key={idx} className="message">
-            <span>{msg.text || msg.content || JSON.stringify(msg)}</span>
-          </div>
-        ))}
-      </div>
-      <form className="send-form" onSubmit={handleSend}>
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Type a message"
-        />
-        <button type="submit">Send</button>
-      </form>
-    </div>
+    <>
+      <AppBar position="static" color="inherit" elevation={0}>
+        <Toolbar>
+          <Button color="primary" onClick={() => navigate("/")}>
+            &larr; Back to Home
+          </Button>
+        </Toolbar>
+      </AppBar>
+      <Container maxWidth="sm" sx={{ py: 8 }}>
+        <Box
+          sx={{
+            bgcolor: "#fff",
+            borderRadius: 3,
+            boxShadow: 1,
+            p: 4,
+            textAlign: "center",
+          }}
+        >
+          <Typography variant="h5" fontWeight="bold" mb={2}>
+            Room Created!
+          </Typography>
+          <Typography variant="body1" mb={3}>
+            Share this magic link to invite others to your chat room:
+          </Typography>
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              bgcolor: "#f5f5f5",
+              borderRadius: 2,
+              px: 2,
+              py: 1,
+              mb: 2,
+              wordBreak: "break-all",
+            }}
+          >
+            <Typography variant="body2" sx={{ flex: 1 }}>
+              {magicLink}
+            </Typography>
+            <IconButton onClick={handleCopy} size="small" sx={{ ml: 1 }}>
+              <ContentCopyIcon fontSize="small" />
+            </IconButton>
+          </Box>
+          <Snackbar
+            open={copied}
+            autoHideDuration={2000}
+            onClose={() => setCopied(false)}
+            message="Link copied!"
+          />
+          {/* Participants section */}
+          <Box
+            sx={{
+              mt: 4,
+              textAlign: "left",
+              bgcolor: "#f9f9f9",
+              borderRadius: 2,
+              p: 2,
+              maxWidth: 340,
+              mx: "auto",
+            }}
+          >
+            <Typography variant="subtitle1" fontWeight="bold" mb={1}>
+              Participants
+            </Typography>
+            <Box display="flex" alignItems="center" gap={1.5}>
+              <Avatar sx={{ bgcolor: "#1976d2", width: 32, height: 32 }}>
+                {window.localStorage.getItem("username")?.[0]?.toUpperCase() ||
+                  "Y"}
+              </Avatar>
+              <Typography variant="body2" fontWeight="medium">
+                {window.localStorage.getItem("username") || "You"}
+              </Typography>
+              <Typography
+                variant="caption"
+                color="text.secondary"
+                sx={{ ml: 1 }}
+              >
+                (You)
+              </Typography>
+            </Box>
+          </Box>
+        </Box>
+      </Container>
+    </>
   );
 }
 

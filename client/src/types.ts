@@ -1,5 +1,5 @@
 export interface User {
-  userId: string;
+  userId: number;
   username: string;
 }
 
@@ -15,4 +15,5 @@ export interface Room {
   roomId: string;
   users: User[];
   messages: Message[];
+  template?: string; // template name or id
 }

@@ -1,21 +1,24 @@
 const express = require("express");
 const router = express.Router();
 const Conversation = require("../models/Conversation");
+const Room = require("../models/Room"); // Add this import
 
-router.post("/join", async (req, res) => {
-  const { roomId } = req.body;
+// GET /api/room-messages?roomId=...
+router.get("/room-messages", async (req, res) => {
+  const { roomId } = req.query;
+  if (!roomId) {
+    return res.status(400).json({ error: "roomId is required" });
+  }
   let conversation = await Conversation.findOne({ roomId });
   if (!conversation) {
-    conversation = new Conversation({ roomId, messages: [] });
-    await conversation.save();
+    return res.json({ messages: [] });
   }
   // Return messages as objects
-  res.json({
-    ...conversation.toObject(),
+  return res.json({
     messages: (conversation.messages || []).map((msg) => ({
       text: msg.text,
       userId: msg.userId,
-      username: msg.username, // Added username
+      username: msg.username,
       timestamp: msg.timestamp,
     })),
   });
