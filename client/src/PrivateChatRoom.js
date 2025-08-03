@@ -54,7 +54,7 @@ function PrivateChatRoom({
   });
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState(messagesProp || []);
-  const [users, setUsers] = useState(usersProp || []);
+  const [users, setUsers] = useState([]);
   const [copied, setCopied] = useState(false);
   // Only show join form if username is missing
   const [showJoin, setShowJoin] = useState(() => {
@@ -94,6 +94,7 @@ function PrivateChatRoom({
   useEffect(() => {
     // Only connect and join if both roomId and username are set
     if (!roomId || !username) return;
+    setUsers([]); // Clear users on join, rely on socket event
     if (!socketRef.current) {
       socketRef.current = io();
     }
@@ -108,27 +109,29 @@ function PrivateChatRoom({
       return;
     }
     console.log("Joining room", roomId, "as", username);
-    socket.emit("joinRoom", { roomId, username });
+    socket.emit("join-room", { roomId, username });
 
     // Listen for initial room data (participants and messages)
     const handleRoomData = (data) => {
-      if (data?.users) setUsers(data.users);
       if (data?.messages) setMessages(data.messages);
     };
     socket.on("roomData", handleRoomData);
 
     // Listen for users update
-    const handleUsers = (userList) => setUsers(userList);
-    socket.on("users", handleUsers);
+    const handleUsers = (userList) => {
+      console.log("[room-users] event received:", userList);
+      setUsers(userList);
+    };
+    socket.on("room-users", handleUsers);
 
     // Listen for messages
     const handleMessage = (msg) => setMessages((prev) => [...prev, msg]);
-    socket.on("message", handleMessage);
+    socket.on("chat-message", handleMessage);
 
     return () => {
       socket.off("roomData", handleRoomData);
-      socket.off("users", handleUsers);
-      socket.off("message", handleMessage);
+      socket.off("room-users", handleUsers);
+      socket.off("chat-message", handleMessage);
       // Only disconnect if username is being cleared or component unmounts
       // (handled in username effect above)
     };

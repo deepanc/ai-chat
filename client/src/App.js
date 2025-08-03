@@ -1,5 +1,5 @@
 // App.js
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   AppBar,
   Toolbar,
@@ -383,29 +383,45 @@ function Home() {
 function RoomWrapper() {
   const location = useLocation();
   const roomId = window.location.pathname.split("/room/")[1];
+  const [messages, setMessages] = useState(null);
+  const [users, setUsers] = useState(null);
+  const [loading, setLoading] = useState(true);
   let username = location.state?.username || null;
-  let users = location.state?.users || null;
-  let messages = location.state?.messages || null;
   if (!username && roomId) {
-    // Try both key formats for backward compatibility
     username =
       window.localStorage.getItem(`chat-username-${roomId}`) ||
       window.localStorage.getItem(`username:${roomId}`) ||
       null;
   }
-  // Always pass roomId as prop
-  if (username) {
-    return (
-      <PrivateChatRoom
-        roomId={roomId}
-        username={username}
-        users={users}
-        messages={messages}
-      />
-    );
-  } else {
+
+  useEffect(() => {
+    if (roomId && username) {
+      setLoading(true);
+      // Fetch latest messages and users for the room
+      fetch(`/api/room-users?roomId=${encodeURIComponent(roomId)}`)
+        .then((res) => res.json())
+        .then((data) => setUsers(data.users || []));
+      fetchRoomMessages(roomId).then((msgs) => {
+        setMessages(msgs);
+        setLoading(false);
+      });
+    }
+  }, [roomId, username]);
+
+  if (!username) {
     return <PrivateChatRoom roomId={roomId} />;
   }
+  if (loading) {
+    return <div>Loading chat room...</div>;
+  }
+  return (
+    <PrivateChatRoom
+      roomId={roomId}
+      username={username}
+      users={users}
+      messages={messages}
+    />
+  );
 }
 
 function App() {

@@ -132,20 +132,18 @@ io.on("connection", (socket) => {
     socketRoomMap[socket.id] = roomId;
     socket.join(roomId);
 
-    // Track user in usersByRoom
-    usersByRoom[roomId] = usersByRoom[roomId] || [];
-    // Prevent duplicates
-    if (!usersByRoom[roomId].some((u) => u.userId === userId)) {
-      usersByRoom[roomId].push({ userId, username });
+    // Always sync usersByRoom from DB before emitting
+    let room = await Room.findOne({ roomId });
+    if (room && !room.users.includes(username)) {
+      room.users.push(username);
+      await room.save();
     }
-
-    // Add username to Room.users array in DB if not present
-    if (roomId && username) {
-      const room = await Room.findOne({ roomId });
-      if (room && !room.users.includes(username)) {
-        room.users.push(username);
-        await room.save();
-      }
+    // Sync in-memory usersByRoom from DB
+    if (room && Array.isArray(room.users)) {
+      usersByRoom[roomId] = room.users.map((uname, idx) => ({
+        userId: idx + 1,
+        username: uname,
+      }));
     }
 
     // Load messages from DB if not in memory
@@ -164,20 +162,29 @@ io.on("connection", (socket) => {
       }
     }
 
+    // Emit initial room data (messages and users) to the joining socket
+    socket.emit("roomData", {
+      messages: messagesByRoom[roomId] || [],
+      users: usersByRoom[roomId] || [],
+    });
+
     if (typeof callback === "function") {
       callback({
         success: true,
         messages: messagesByRoom[roomId],
         userId,
         username,
-        users: usersByRoom[roomId], // send current users in room
+        users: usersByRoom[roomId],
       });
     }
-    // Always emit current users to all in room
-    io.to(roomId).emit("room-users", usersByRoom[roomId]);
+    // Always emit the latest users list
+    if (roomId && usersByRoom[roomId]) {
+      socket.emit("room-users", usersByRoom[roomId]);
+      io.to(roomId).emit("room-users", usersByRoom[roomId]);
+    }
   });
 
-  socket.on("chat-message", (msg) => {
+  socket.on("sendMessage", (msg) => {
     const user = users[socket.id];
     if (!user || !msg.roomId) return;
     const message = {
