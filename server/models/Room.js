@@ -5,7 +5,9 @@ const RoomSchema = new mongoose.Schema({
   name: { type: String, required: true },
   template: { type: mongoose.Schema.Types.ObjectId, ref: "Template" },
   magicLink: { type: String },
-  users: [{ type: String }], // <-- Add this line to store usernames
+  users: [{ type: String }],
+  archived: { type: Boolean, default: false },
+  createdAt: { type: Date, default: Date.now },
 });
 
 module.exports = mongoose.model("Room", RoomSchema);

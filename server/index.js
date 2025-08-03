@@ -1,3 +1,16 @@
+// --- Room Archiving Job ---
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+setInterval(async () => {
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - ONE_DAY_MS);
+  const result = await Room.updateMany(
+    { archived: false, createdAt: { $lt: cutoff } },
+    { $set: { archived: true } }
+  );
+  if (result.modifiedCount > 0) {
+    console.log(`Archived ${result.modifiedCount} room(s) older than 1 day.`);
+  }
+}, 60 * 60 * 1000); // Run every hour
 require("dotenv").config();
 
 // Add this import for GoogleGenerativeAI
