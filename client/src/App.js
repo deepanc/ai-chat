@@ -1,3 +1,4 @@
+const API_URL = process.env.REACT_APP_API_URL || "";
 // App.js
 import React, { useState, useEffect } from "react";
 import {
@@ -113,7 +114,7 @@ function Home() {
     const slug = slugify(roomName);
     if (!slug) return;
     const res = await fetch(
-      `/api/room-by-name?roomName=${encodeURIComponent(roomName)}`
+      `${API_URL}/api/room-by-name?roomName=${encodeURIComponent(roomName)}`
     );
     if (res.ok) {
       const data = await res.json();
@@ -121,7 +122,7 @@ function Home() {
         setExistingRoom({ roomId: data.roomId, magicLink: data.magicLink });
         // Always fetch users from DB for this room
         const usersRes = await fetch(
-          `/api/room-users?roomId=${encodeURIComponent(data.roomId)}`
+          `${API_URL}/api/room-users?roomId=${encodeURIComponent(data.roomId)}`
         );
         if (usersRes.ok) {
           const usersData = await usersRes.json();
@@ -144,7 +145,7 @@ function Home() {
     setError("");
     if (existingRoom) {
       // Always join, even if user already exists, to ensure user is in DB
-      await fetch("/api/join", {
+      await fetch(`${API_URL}/api/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -154,7 +155,9 @@ function Home() {
       });
       // Fetch updated users list after join
       const usersRes = await fetch(
-        `/api/room-users?roomId=${encodeURIComponent(existingRoom.roomId)}`
+        `${API_URL}/api/room-users?roomId=${encodeURIComponent(
+          existingRoom.roomId
+        )}`
       );
       let usersList = [];
       if (usersRes.ok) {
@@ -174,7 +177,7 @@ function Home() {
     const slug = slugify(roomName);
     const id = Math.random().toString(36).slice(2, 10);
     const roomId = `${slug}-${id}`;
-    await fetch("/api/create-room", {
+    await fetch(`${API_URL}/api/create-room`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -186,7 +189,7 @@ function Home() {
     });
     // After creating, fetch users (should include the creator)
     const usersRes = await fetch(
-      `/api/room-users?roomId=${encodeURIComponent(roomId)}`
+      `${API_URL}/api/room-users?roomId=${encodeURIComponent(roomId)}`
     );
     let usersList = [];
     if (usersRes.ok) {
@@ -206,7 +209,7 @@ function Home() {
     setUsername(selectedUsername);
     setShowUserSelect(false);
     // Always join to ensure user is in DB
-    await fetch("/api/join", {
+    await fetch(`${API_URL}/api/join`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -216,7 +219,9 @@ function Home() {
     });
     // Fetch updated users list after join
     const usersRes = await fetch(
-      `/api/room-users?roomId=${encodeURIComponent(existingRoom.roomId)}`
+      `${API_URL}/api/room-users?roomId=${encodeURIComponent(
+        existingRoom.roomId
+      )}`
     );
     let usersList = [];
     if (usersRes.ok) {
@@ -398,7 +403,7 @@ function RoomWrapper() {
     if (roomId && username) {
       setLoading(true);
       // Fetch latest messages and users for the room
-      fetch(`/api/room-users?roomId=${encodeURIComponent(roomId)}`)
+      fetch(`${API_URL}/api/room-users?roomId=${encodeURIComponent(roomId)}`)
         .then((res) => res.json())
         .then((data) => setUsers(data.users || []));
       fetchRoomMessages(roomId).then((msgs) => {
