@@ -41,6 +41,8 @@ function PrivateChatRoom({
   users: usersProp = null,
   messages: messagesProp = null,
 }) {
+  // Use backend URL for socket connection
+  const SOCKET_URL = process.env.REACT_APP_API_URL || "";
   // Always use the roomId prop if provided, fallback to useParams for direct URL entry
   const { roomId: roomIdFromParams } = useParams();
   const roomId = roomIdProp || roomIdFromParams;
@@ -96,7 +98,10 @@ function PrivateChatRoom({
     if (!roomId || !username) return;
     setUsers([]); // Clear users on join, rely on socket event
     if (!socketRef.current) {
-      socketRef.current = io();
+      socketRef.current = io(SOCKET_URL, {
+        transports: ["websocket", "polling"],
+        withCredentials: true,
+      });
     }
     const socket = socketRef.current;
 
