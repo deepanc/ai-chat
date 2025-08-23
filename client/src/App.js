@@ -113,6 +113,7 @@ function Home() {
     setShowUserSelect(false);
     const slug = slugify(roomName);
     if (!slug) return;
+    console.log("Checking API URL:", API_URL);
     const res = await fetch(
       `${API_URL}/api/room-by-name?roomName=${encodeURIComponent(roomName)}`
     );
