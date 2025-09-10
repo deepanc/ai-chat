@@ -40,6 +40,7 @@ function PrivateChatRoom({
   username: usernameProp,
   users: usersProp = null,
   messages: messagesProp = null,
+  roomName: roomNameProp = null,
 }) {
   // Use backend URL for socket connection
   const SOCKET_URL = process.env.REACT_APP_API_URL || "";
@@ -66,6 +67,22 @@ function PrivateChatRoom({
   const [joinName, setJoinName] = useState("");
   // Magic link for sharing the room
   const magicLink = `${window.location.origin}/room/${roomId}`;
+
+  // Room name state
+  const [roomName, setRoomName] = useState(roomNameProp || "");
+
+  // Fetch room name by roomId if not provided
+  useEffect(() => {
+    if (!roomName && roomId) {
+      fetch(`/api/room-info?roomId=${encodeURIComponent(roomId)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data && data.exists && data.roomId === roomId && data.roomName) {
+            setRoomName(data.roomName);
+          }
+        });
+    }
+  }, [roomId, roomName]);
 
   // Show join form if username is not set
   useEffect(() => {
@@ -157,11 +174,69 @@ function PrivateChatRoom({
     setInput("");
   };
 
-  // ...existing code...
   const handleCopy = () => {
     navigator.clipboard.writeText(magicLink);
     setCopied(true);
   };
+
+  // Material-like color palette for avatars
+  const avatarColors = [
+    "#7e57c2", // purple
+    "#5c6bc0", // indigo
+    "#26a69a", // teal
+    "#ef5350", // red
+    "#ab47bc", // deep purple
+    "#42a5f5", // blue
+    "#66bb6a", // green
+    "#ffa726", // orange
+    "#8d6e63", // brown
+    "#789262", // olive
+    "#d4e157", // lime
+    "#ffb300", // amber
+    "#8e24aa", // purple dark
+    "#3949ab", // indigo dark
+    "#00897b", // teal dark
+    "#c62828", // red dark
+    "#ad1457", // pink dark
+    "#6d4c41", // brown dark
+    "#607d8b", // blue grey
+    "#fbc02d", // yellow dark
+  ];
+  function getAvatarColor(name) {
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) {
+      hash = name.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return avatarColors[Math.abs(hash) % avatarColors.length];
+  }
+  function isColorLight(hex) {
+    // Simple luminance check for text color
+    hex = hex.replace("#", "");
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+    return luminance > 0.6;
+  }
+
+  // Utility to get initials from username
+  function getInitials(name) {
+    if (!name) return "?";
+    const parts = name.trim().split(" ");
+    if (parts.length === 1) {
+      return name.length > 1
+        ? name[0].toUpperCase() + name[name.length - 1].toUpperCase()
+        : name[0].toUpperCase();
+    }
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+
+  // Helper to check if user is AI Chatty
+  function isAIChatty(name) {
+    if (!name) return false;
+    const norm = name.toLowerCase().replace(/\s+/g, "");
+    return norm === "aichatty" || norm === "aiobserver";
+  }
 
   // Render join form if needed
   if (showJoin) {
@@ -214,37 +289,40 @@ function PrivateChatRoom({
             }}
           >
             <Typography variant="h5" fontWeight="bold" mb={2}>
-              Private Chat Room
+              {roomName || "Chat Room"}
             </Typography>
-            <Typography variant="body1" mb={3}>
-              Share this magic link to invite others to your chat room:
-            </Typography>
-            <Box
-              sx={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "flex-start",
-                bgcolor: "#f5f5f5",
-                borderRadius: 2,
-                px: 2,
-                py: 1,
-                mb: 2,
-                wordBreak: "break-all",
-              }}
-            >
-              <Typography variant="body2" sx={{ flex: 1 }}>
-                {magicLink}
+            {/* Invite others link in chat window */}
+            <Box sx={{ width: "100%", mb: 2 }}>
+              <Typography variant="subtitle2" fontWeight="bold" mb={1}>
+                Invite others
               </Typography>
-              <IconButton onClick={handleCopy} size="small" sx={{ ml: 1 }}>
-                <ContentCopyIcon fontSize="small" />
-              </IconButton>
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "flex-start",
+                  bgcolor: "#f5f5f5",
+                  borderRadius: 2,
+                  px: 2,
+                  py: 1,
+                  mb: 1,
+                  wordBreak: "break-all",
+                }}
+              >
+                <Typography variant="body2" sx={{ flex: 1 }}>
+                  {magicLink}
+                </Typography>
+                <IconButton onClick={handleCopy} size="small" sx={{ ml: 1 }}>
+                  <ContentCopyIcon fontSize="small" />
+                </IconButton>
+              </Box>
+              <Snackbar
+                open={copied}
+                autoHideDuration={2000}
+                onClose={() => setCopied(false)}
+                message="Link copied!"
+              />
             </Box>
-            <Snackbar
-              open={copied}
-              autoHideDuration={2000}
-              onClose={() => setCopied(false)}
-              message="Link copied!"
-            />
             <Paper
               sx={{
                 flex: 1,
@@ -259,69 +337,73 @@ function PrivateChatRoom({
                 {messages.map((msg, idx) => {
                   const isYou = msg.username === username;
                   const isSystem = msg.system;
-                  // Avatar logic (same as participants)
-                  let hash = 0;
-                  for (let i = 0; i < (msg.username || "").length; i++) {
-                    hash = (hash << 5) - hash + msg.username.charCodeAt(i);
-                    hash |= 0;
-                  }
-                  const gender = hash % 2 === 0 ? "male" : "female";
-                  const avatars =
-                    gender === "male" ? maleAvatars : femaleAvatars;
-                  const url = avatars[Math.abs(hash) % avatars.length];
                   return (
                     <ListItem
                       key={idx}
                       alignItems="flex-start"
                       sx={{
-                        justifyContent: isSystem
-                          ? "center"
-                          : isYou
-                          ? "flex-end"
-                          : "flex-start",
-                        bgcolor: isSystem
-                          ? "#fffde7"
-                          : isYou
-                          ? "#e3f2fd"
-                          : "inherit",
+                        justifyContent: isSystem ? "center" : "flex-start",
+                        bgcolor: isSystem ? "#fffde7" : "inherit",
                         borderRadius: 2,
                         mb: 0.5,
                         px: 2,
                         display: "flex",
-                        flexDirection: isYou ? "row-reverse" : "row",
+                        flexDirection: "row",
                         gap: 1.5,
                       }}
                     >
                       {!isSystem && (
-                        <Avatar
-                          src={url}
-                          alt={msg.username}
+                        <Box
                           sx={{
-                            width: 32,
-                            height: 32,
-                            fontWeight: "bold",
+                            width: 36,
+                            height: 36,
+                            borderRadius: "50%",
+                            bgcolor: isAIChatty(msg.username)
+                              ? "#ffd600"
+                              : getAvatarColor(msg.username || "?"),
+                            color: isAIChatty(msg.username)
+                              ? "#222"
+                              : isColorLight(
+                                  getAvatarColor(msg.username || "?")
+                                )
+                              ? "#222"
+                              : "#fff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontWeight: "normal",
+                            fontSize: 18,
+                            textTransform: "uppercase",
+                            border: "1.5px solid #eee",
+                            boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
                             mt: 0.5,
                           }}
-                        />
+                        >
+                          {isAIChatty(msg.username) ? (
+                            <SmartToyIcon
+                              fontSize="small"
+                              sx={{ color: "#222" }}
+                            />
+                          ) : (
+                            getInitials(msg.username || "?")
+                          )}
+                        </Box>
                       )}
                       <Box sx={{ maxWidth: "70%", minWidth: 0 }}>
                         {!isSystem && (
                           <Typography
                             variant="caption"
                             color={isYou ? "primary" : "text.secondary"}
-                            fontWeight={isYou ? "bold" : "normal"}
                             sx={{ mb: 0.5 }}
                           >
-                            {msg.username || "Unknown"}
+                            {isAIChatty(msg.username)
+                              ? "AI Chatty"
+                              : msg.username || "Unknown"}
                           </Typography>
                         )}
                         <Box
                           sx={{
-                            bgcolor: isSystem
-                              ? "#fffde7"
-                              : isYou
-                              ? "#e3f2fd"
-                              : "#f5f5f5",
+                            bgcolor: isSystem ? "#fffde7" : "#f5f5f5",
                             borderRadius: 2,
                             px: 2,
                             py: 1,
@@ -330,11 +412,7 @@ function PrivateChatRoom({
                             color: isSystem ? "warning.main" : "inherit",
                             fontWeight: isSystem ? "bold" : "normal",
                             fontSize: "1rem",
-                            textAlign: isSystem
-                              ? "center"
-                              : isYou
-                              ? "right"
-                              : "left",
+                            textAlign: isSystem ? "center" : "left",
                           }}
                         >
                           {msg.text}
@@ -418,30 +496,37 @@ function PrivateChatRoom({
                     boxShadow: user.username === username ? 1 : 0,
                   }}
                 >
-                  {(() => {
-                    // Deterministically pick male/female and a unique avatar per user
-                    let hash = 0;
-                    for (let i = 0; i < user.username.length; i++) {
-                      hash = (hash << 5) - hash + user.username.charCodeAt(i);
-                      hash |= 0;
-                    }
-                    const gender = hash % 2 === 0 ? "male" : "female";
-                    const avatars =
-                      gender === "male" ? maleAvatars : femaleAvatars;
-                    const url = avatars[Math.abs(hash) % avatars.length];
-                    return (
-                      <Avatar
-                        src={url}
-                        alt={user.username}
-                        sx={{ width: 32, height: 32, fontWeight: "bold" }}
-                      />
-                    );
-                  })()}
-                  <Typography
-                    variant="body2"
-                    fontWeight={user.username === username ? "bold" : "normal"}
+                  <Box
+                    sx={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: "50%",
+                      bgcolor: isAIChatty(user.username)
+                        ? "#ffd600" // yellow for AI Chatty
+                        : getAvatarColor(user.username),
+                      color: isAIChatty(user.username)
+                        ? "#222"
+                        : isColorLight(getAvatarColor(user.username))
+                        ? "#222"
+                        : "#fff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontWeight: "normal",
+                      fontSize: 18,
+                      textTransform: "uppercase",
+                      border: "1.5px solid #eee",
+                      boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                    }}
                   >
-                    {user.username}
+                    {isAIChatty(user.username) ? (
+                      <SmartToyIcon fontSize="small" sx={{ color: "#222" }} />
+                    ) : (
+                      getInitials(user.username)
+                    )}
+                  </Box>
+                  <Typography variant="body2">
+                    {isAIChatty(user.username) ? "AI Chatty" : user.username}
                   </Typography>
                   {user.username === username && (
                     <Chip
@@ -460,8 +545,40 @@ function PrivateChatRoom({
               }`}
               variant="outlined"
               size="small"
-              sx={{ mt: 2 }}
+              sx={{ mt: 2, mb: 2 }}
             />
+            {/* Invite others section */}
+            <Box sx={{ width: "100%", mt: 1 }}>
+              <Typography variant="subtitle2" fontWeight="bold" mb={1}>
+                Invite others
+              </Typography>
+              <Box
+                sx={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "flex-start",
+                  bgcolor: "#f5f5f5",
+                  borderRadius: 2,
+                  px: 2,
+                  py: 1,
+                  mb: 1,
+                  wordBreak: "break-all",
+                }}
+              >
+                <Typography variant="body2" sx={{ flex: 1 }}>
+                  {magicLink}
+                </Typography>
+                <IconButton onClick={handleCopy} size="small" sx={{ ml: 1 }}>
+                  <ContentCopyIcon fontSize="small" />
+                </IconButton>
+              </Box>
+              <Snackbar
+                open={copied}
+                autoHideDuration={2000}
+                onClose={() => setCopied(false)}
+                message="Link copied!"
+              />
+            </Box>
           </Box>
         </Box>
       </Container>

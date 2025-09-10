@@ -1,3 +1,4 @@
+// ...existing code...
 // --- Room Archiving Job ---
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 setInterval(async () => {
@@ -39,6 +40,17 @@ app.use("/api", conversationRoutes);
 
 // Health check endpoint
 app.get("/health", (req, res) => res.send("OK"));
+
+// API to get room info (name) by roomId
+app.get("/api/room-info", async (req, res) => {
+  const { roomId } = req.query;
+  if (!roomId) return res.status(400).json({ error: "roomId required" });
+  const room = await Room.findOne({ roomId });
+  if (room) {
+    return res.json({ exists: true, roomId: room.roomId, roomName: room.name });
+  }
+  res.json({ exists: false });
+});
 
 // Connect to MongoDB
 mongoose

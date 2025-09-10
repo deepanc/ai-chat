@@ -1,25 +1,30 @@
+require("dotenv").config();
 const mongoose = require("mongoose");
 const Template = require("../models/Template");
+const fs = require("fs");
+const path = require("path");
 
 async function seed() {
-  await mongoose.connect("mongodb://127.0.0.1:27017/ai-chat", {
+  await mongoose.connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
   });
 
+  // Read each template's prompt from its own markdown file in scripts
+  const promptFiles = {
+    General: path.resolve(__dirname, "./General.md"),
+    Debate: path.resolve(__dirname, "./Debate.md"),
+    Brainstorm: path.resolve(__dirname, "./Brainstorm.md"),
+  };
+  const templates = Object.entries(promptFiles).map(([name, file]) => ({
+    name,
+    prompt: fs.readFileSync(file, "utf8").trim(),
+  }));
+
   const count = await Template.countDocuments();
   if (count === 0) {
-    await Template.create([
-      {
-        name: "General",
-        prompt: "Casual conversations and open discussions.",
-      },
-      {
-        name: "Debate",
-        prompt: "Structured debates and argumentation.",
-      },
-    ]);
-    console.log("Inserted default templates.");
+    await Template.create(templates);
+    console.log("Inserted default templates from individual markdown files.");
   } else {
     console.log("Templates already exist.");
   }

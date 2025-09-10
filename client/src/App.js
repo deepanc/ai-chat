@@ -257,10 +257,6 @@ function Home() {
               ChatterBox
             </Typography>
           </Box>
-          <Box display="flex" gap={2}>
-            <Button color="inherit">Home</Button>
-            <Button color="inherit">Explore</Button>
-          </Box>
         </Toolbar>
       </AppBar>
       <Container maxWidth="lg" sx={{ py: 8 }}>
