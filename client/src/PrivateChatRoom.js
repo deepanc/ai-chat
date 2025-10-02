@@ -50,39 +50,75 @@ function PrivateChatRoom({
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
   const navigate = useNavigate();
-  // Persist username per room in localStorage
-  const [username, setUsername] = useState(() => {
-    const saved = localStorage.getItem(`chat-username-${roomId}`);
-    return usernameProp || saved || "";
-  });
+  // Only use username prop, don't auto-retrieve from localStorage
+  // This ensures direct room link visits always show the join screen
+  const [username, setUsername] = useState(usernameProp || "");
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState(messagesProp || []);
   const [users, setUsers] = useState([]);
   const [copied, setCopied] = useState(false);
-  // Only show join form if username is missing
-  const [showJoin, setShowJoin] = useState(() => {
-    const saved = localStorage.getItem(`chat-username-${roomId}`);
-    return saved ? false : true;
-  });
+  // Show join form if no username is provided
+  const [showJoin, setShowJoin] = useState(!usernameProp);
   const [joinName, setJoinName] = useState("");
+  const [existingRoomUsers, setExistingRoomUsers] = useState([]);
+  const [isExistingUser, setIsExistingUser] = useState(false);
   // Magic link for sharing the room
   const magicLink = `${window.location.origin}/room/${roomId}`;
 
   // Room name state
   const [roomName, setRoomName] = useState(roomNameProp || "");
 
-  // Fetch room name by roomId if not provided
+  // Fetch room name and existing users by roomId if not provided
   useEffect(() => {
-    if (!roomName && roomId) {
-      fetch(`/api/room-info?roomId=${encodeURIComponent(roomId)}`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data && data.exists && data.roomId === roomId && data.roomName) {
-            setRoomName(data.roomName);
-          }
-        });
+    if (roomId) {
+      // Fetch room info
+      if (!roomName) {
+        fetch(
+          `${SOCKET_URL}/api/room-info?roomId=${encodeURIComponent(roomId)}`
+        )
+          .then((res) => res.json())
+          .then((data) => {
+            if (
+              data &&
+              data.exists &&
+              data.roomId === roomId &&
+              data.roomName
+            ) {
+              setRoomName(data.roomName);
+            }
+          });
+      }
+
+      // Fetch existing users if showing join screen
+      if (showJoin) {
+        fetch(
+          `${SOCKET_URL}/api/room-users?roomId=${encodeURIComponent(roomId)}`
+        )
+          .then((res) => res.json())
+          .then((data) => {
+            setExistingRoomUsers(data.users || []);
+          })
+          .catch((err) => {
+            console.error("Error fetching room users:", err);
+          });
+      }
     }
-  }, [roomId, roomName]);
+  }, [roomId, roomName, showJoin, SOCKET_URL]);
+
+  // Check if entered username is an existing user
+  useEffect(() => {
+    if (joinName.trim() && existingRoomUsers.length > 0) {
+      const trimmedName = joinName.trim();
+      const exists = existingRoomUsers.some(
+        (user) =>
+          user.username &&
+          user.username.toLowerCase() === trimmedName.toLowerCase()
+      );
+      setIsExistingUser(exists);
+    } else {
+      setIsExistingUser(false);
+    }
+  }, [joinName, existingRoomUsers]);
 
   // Show join form if username is not set
   useEffect(() => {
@@ -243,9 +279,19 @@ function PrivateChatRoom({
     return (
       <Container maxWidth="sm" sx={{ py: 10 }}>
         <Paper sx={{ p: 5, textAlign: "center" }}>
-          <Typography variant="h5" fontWeight="bold" mb={2}>
-            Enter your name to join the chat room
+          <Typography variant="h4" fontWeight="bold" mb={1}>
+            {roomName || "Chat Room"}
           </Typography>
+          <Typography variant="body1" color="text.secondary" mb={2}>
+            Enter your name to join the conversation
+          </Typography>
+          {existingRoomUsers.length > 0 && (
+            <Typography variant="body2" color="text.secondary" mb={4}>
+              {existingRoomUsers.length} participant
+              {existingRoomUsers.length !== 1 ? "s" : ""} already in this room
+            </Typography>
+          )}
+          {existingRoomUsers.length === 0 && <Box sx={{ mb: 2 }} />}
           <form onSubmit={handleJoin} autoComplete="off">
             <TextField
               value={joinName}
@@ -253,10 +299,29 @@ function PrivateChatRoom({
               label="Your Name"
               fullWidth
               required
-              sx={{ mb: 3 }}
+              sx={{ mb: 1 }}
+              autoFocus
             />
-            <Button type="submit" variant="contained" color="primary" fullWidth>
-              Join Room
+            {joinName.trim() && !isExistingUser && (
+              <Typography
+                variant="body2"
+                color="success.main"
+                sx={{ mb: 2, textAlign: "left", fontSize: "0.85rem" }}
+              >
+                {existingRoomUsers.length > 0
+                  ? "Ready to join the conversation!"
+                  : "Ready to start the conversation!"}
+              </Typography>
+            )}
+            <Button
+              type="submit"
+              variant="contained"
+              color="primary"
+              fullWidth
+              size="large"
+              sx={{ py: 1.5, fontSize: "1.1rem", mt: joinName.trim() ? 1 : 2 }}
+            >
+              {isExistingUser ? "Enter Room" : "Join Room"}
             </Button>
           </form>
         </Paper>

@@ -13,6 +13,8 @@ const MessageSchema = new mongoose.Schema(
 const ConversationSchema = new mongoose.Schema({
   roomId: { type: String, required: true, unique: true },
   messages: { type: [MessageSchema], default: [] },
+  summary: { type: String, default: "" }, // Summary of conversation history
+  lastSummaryAt: { type: Number, default: 0 }, // Message count when last summary was created
   template: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Template",

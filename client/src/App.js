@@ -388,13 +388,9 @@ function RoomWrapper() {
   const [messages, setMessages] = useState(null);
   const [users, setUsers] = useState(null);
   const [loading, setLoading] = useState(true);
+  // Only use username from navigation state, not from localStorage
+  // This ensures direct room link visits always show the join screen
   let username = location.state?.username || null;
-  if (!username && roomId) {
-    username =
-      window.localStorage.getItem(`chat-username-${roomId}`) ||
-      window.localStorage.getItem(`username:${roomId}`) ||
-      null;
-  }
 
   useEffect(() => {
     if (roomId && username) {

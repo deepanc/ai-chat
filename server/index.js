@@ -1,4 +1,3 @@
-// ...existing code...
 // --- Room Archiving Job ---
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 setInterval(async () => {
@@ -89,14 +88,197 @@ const genAI = process.env.GOOGLE_GENAI_API_KEY
   : null;
 console.log(`Google Generative AI ${genAI ? "enabled" : "disabled"}`);
 
-// Helper to get last N messages as a prompt
-function buildPrompt(messages, roomId) {
-  const lastMsgs = messages.slice(-8);
-  let prompt = `You are an AI observer in a chat room (${roomId}). Occasionally, you provide helpful, insightful, or fun comments, but you do not dominate the conversation. Here is the recent conversation:\n`;
-  for (const msg of lastMsgs) {
-    prompt += `${msg.username || "User"}: ${msg.text}\n`;
+// Helper to generate conversation summary using AI
+async function generateConversationSummary(messages, roomId) {
+  console.log(
+    `[SUMMARY] Starting summary generation for room ${roomId} with ${messages.length} messages`
+  );
+
+  if (!genAI) {
+    console.log(`[SUMMARY] GenAI not available`);
+    return "";
   }
-  prompt += `\nAs the AI Observer, reply with a short, relevant, and friendly message. If you have nothing to add, reply with "[NO_REPLY]".\nAI Observer:`;
+
+  if (!messages || messages.length === 0) {
+    console.log(`[SUMMARY] No messages to summarize`);
+    return "";
+  }
+
+  try {
+    // Filter out AI messages for summary (keep only real user messages)
+    const realMessages = messages.filter(
+      (msg) => msg.userId !== AI_OBSERVER_USERID
+    );
+
+    console.log(`[SUMMARY] Filtered to ${realMessages.length} real messages`);
+
+    if (realMessages.length === 0) {
+      console.log(`[SUMMARY] No real messages after filtering`);
+      return "";
+    }
+
+    // Build summary prompt
+    let summaryPrompt = `Please create a concise summary of the following conversation. Focus on key topics discussed, important decisions made, and main themes. Keep it brief but informative.
+
+Conversation to summarize:
+`;
+
+    for (const msg of realMessages) {
+      summaryPrompt += `${msg.username || "User"}: ${msg.text}\n`;
+    }
+
+    summaryPrompt += `\nProvide a summary in 2-3 sentences that captures the essence of this conversation:`;
+
+    console.log(
+      `[SUMMARY] Built prompt with ${summaryPrompt.length} characters`
+    );
+
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    console.log(`[SUMMARY] Calling Gemini API...`);
+
+    const result = await model.generateContent(summaryPrompt);
+    const summary =
+      result?.response?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+      "";
+
+    console.log(
+      `[SUMMARY] Generated summary for room ${roomId} (${summary.length} chars):`,
+      summary
+    );
+    return summary;
+  } catch (err) {
+    console.error(
+      `[SUMMARY] Error generating summary for room ${roomId}:`,
+      err.message || err
+    );
+    return "";
+  }
+}
+
+// Helper to generate dynamic system notes for AI context
+function generateSystemNotes(roomId, messages) {
+  const systemNotes = [];
+  const currentParticipants = usersByRoom[roomId] || [];
+
+  // Find recent joins by looking at participant changes in recent messages
+  const recentMessages = messages.slice(-10);
+  const recentUsernames = new Set();
+  const messageUsernames = new Set();
+
+  // Collect usernames from recent messages and current participants
+  for (const msg of recentMessages) {
+    if (!msg.isSystemNote && msg.userId !== AI_OBSERVER_USERID) {
+      recentUsernames.add(msg.username);
+    }
+  }
+
+  for (const msg of messages) {
+    if (!msg.isSystemNote && msg.userId !== AI_OBSERVER_USERID) {
+      messageUsernames.add(msg.username);
+    }
+  }
+
+  // Check for new participants (in current participants but with very few messages)
+  for (const participant of currentParticipants) {
+    const userMessages = messages.filter(
+      (m) =>
+        m.username === participant.username &&
+        !m.isSystemNote &&
+        m.userId !== AI_OBSERVER_USERID
+    );
+    if (userMessages.length <= 2 && recentUsernames.has(participant.username)) {
+      systemNotes.push(
+        `A participant "${participant.username}" recently joined the room.`
+      );
+    }
+  }
+
+  // Add participant count info
+  if (currentParticipants.length > 0) {
+    systemNotes.push(
+      `There are currently ${currentParticipants.length} participants in the room.`
+    );
+  }
+
+  return systemNotes;
+}
+
+// Helper to get last N messages as a prompt, using template if available
+async function buildPrompt(messages, roomId) {
+  // Find the room and populate its template
+  const room = await Room.findOne({ roomId }).populate("template");
+  let basePrompt =
+    (room && room.template && room.template.prompt) ||
+    `You are an AI observer in a chat room (${roomId}). Occasionally, you provide helpful, insightful, or fun comments, but you do not dominate the conversation.`;
+
+  // Get current room participants for dynamic replacements
+  const currentParticipants = usersByRoom[roomId] || [];
+  const participantCount = currentParticipants.length;
+  const exampleName =
+    currentParticipants.length > 0
+      ? currentParticipants[participantCount - 1].username
+      : "";
+
+  // Get conversation summary and recent messages since summary
+  let conversationContext = "";
+  let lastSummaryAt = 0;
+
+  try {
+    const conversation = await Conversation.findOne({ roomId });
+    if (conversation && conversation.summary) {
+      conversationContext += `\nConversation summary: ${conversation.summary}\n`;
+      lastSummaryAt = conversation.lastSummaryAt || 0;
+    }
+  } catch (err) {
+    console.error(
+      `Error loading conversation summary for room ${roomId}:`,
+      err
+    );
+  }
+
+  // Generate dynamic system notes for context
+  const systemNotes = generateSystemNotes(roomId, messages);
+  if (systemNotes.length > 0) {
+    conversationContext += `\nCurrent room status:\n`;
+    for (const note of systemNotes) {
+      conversationContext += `System note: ${note}\n`;
+    }
+  }
+
+  // Add messages since last summary (or recent messages if no summary)
+  const realMessages = messages.filter((msg) => !msg.isSystemNote);
+  let messagesToShow;
+
+  if (lastSummaryAt > 0 && realMessages.length > lastSummaryAt) {
+    // Show messages since last summary
+    messagesToShow = realMessages.slice(lastSummaryAt);
+    conversationContext += `\nMessages since last summary:\n`;
+  } else {
+    // No summary yet, show recent messages
+    messagesToShow = realMessages.slice(-8);
+    conversationContext += `\nRecent conversation:\n`;
+  }
+
+  for (const msg of messagesToShow) {
+    conversationContext += `${msg.username || "User"}: ${msg.text}\n`;
+  }
+
+  // Replace dynamic placeholders in the prompt
+  basePrompt = basePrompt.replace(/\$\{roomId\}/g, roomId);
+  basePrompt = basePrompt.replace(/<name>/g, exampleName);
+  basePrompt = basePrompt.replace(/<number>/g, participantCount.toString());
+  basePrompt = basePrompt.replace(
+    /\$\{recentConversation\}/g,
+    conversationContext
+  );
+
+  let prompt = basePrompt;
+
+  // Optionally, you can append a final instruction if not already in the template
+  if (!basePrompt.includes("[NO_REPLY]")) {
+    prompt += `\nAs the AI Observer, reply with a short, relevant, and friendly message. Do not mention room IDs or room codes in your response. If you have nothing to add, reply with "[NO_REPLY]".\nAI Observer:`;
+  }
+  console.log(prompt);
   return prompt;
 }
 
@@ -104,14 +286,24 @@ function buildPrompt(messages, roomId) {
 async function aiObserverTick(io, messagesByRoom) {
   if (!genAI) return;
   for (const [roomId, messages] of Object.entries(messagesByRoom)) {
-    if (!messages || messages.length < AI_OBSERVER_MIN_MESSAGES) continue;
+    // Filter out AI messages for counting real user messages
+    const realMessages = messages.filter(
+      (msg) => msg.userId !== AI_OBSERVER_USERID
+    );
+    if (!realMessages || realMessages.length < AI_OBSERVER_MIN_MESSAGES)
+      continue;
+
     // Don't reply if last message was from AI
     const lastMsg = messages[messages.length - 1];
-    if (lastMsg && lastMsg.userId === AI_OBSERVER_USERID) continue;
+    if (lastMsg && lastMsg.userId === AI_OBSERVER_USERID) {
+      // If last AI message was recent (within 1 minute), skip to avoid spam
+      const timeSinceLastAI = new Date() - new Date(lastMsg.timestamp || 0);
+      if (timeSinceLastAI < 60000) continue; // 60 seconds
+    }
 
     try {
-      const prompt = buildPrompt(messages, roomId);
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const prompt = await buildPrompt(messages, roomId);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
       const result = await model.generateContent(prompt);
       // Extract text from Gemini result
       const aiText =
@@ -127,6 +319,7 @@ async function aiObserverTick(io, messagesByRoom) {
           username: AI_OBSERVER_NAME,
           roomId,
           text: aiText,
+          timestamp: new Date(),
         };
         messagesByRoom[roomId].push(aiMsg);
         io.to(roomId).emit("chat-message", aiMsg);
@@ -159,7 +352,8 @@ io.on("connection", (socket) => {
 
     // Always sync usersByRoom from DB before emitting
     let room = await Room.findOne({ roomId });
-    if (room && !room.users.includes(username)) {
+    const isNewUser = room && !room.users.includes(username);
+    if (isNewUser) {
       room.users.push(username);
       await room.save();
     }
@@ -181,22 +375,79 @@ io.on("connection", (socket) => {
           username: msg.username,
           roomId,
           text: msg.text,
+          timestamp: msg.timestamp,
         }));
       } else {
         messagesByRoom[roomId] = [];
       }
     }
 
+    // Trigger AI to generate a welcome greeting specifically for new users
+    if (isNewUser && messagesByRoom[roomId]) {
+      setTimeout(async () => {
+        if (!genAI) return;
+        try {
+          // Build a specific welcome prompt for the new user
+          const room = await Room.findOne({ roomId }).populate("template");
+          let welcomePrompt =
+            (room && room.template && room.template.prompt) ||
+            `You are an AI observer in a chat room (${roomId}). A new participant "${username}" has just joined.`;
+
+          // Replace placeholders with context information
+          welcomePrompt = welcomePrompt.replace(/\$\{roomId\}/g, roomId);
+          welcomePrompt = welcomePrompt.replace(/<name>/g, username);
+          welcomePrompt = welcomePrompt.replace(
+            /<number>/g,
+            (usersByRoom[roomId] || []).length.toString()
+          );
+
+          // Add specific welcome instruction
+          welcomePrompt += `\n\nA new participant "${username}" has just joined. Welcome them warmly by name with a brief, friendly greeting. Do not mention the room ID or room code in your message.`;
+
+          console.log("AI Welcome Prompt:", welcomePrompt);
+
+          const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+          const result = await model.generateContent(welcomePrompt);
+          const aiText =
+            result?.response?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+            "";
+          if (
+            aiText &&
+            !aiText.startsWith("[NO_REPLY]") &&
+            aiText.length < 500
+          ) {
+            const aiGreeting = {
+              userId: AI_OBSERVER_USERID,
+              username: AI_OBSERVER_NAME,
+              roomId,
+              text: aiText,
+              timestamp: new Date(),
+            };
+            messagesByRoom[roomId].push(aiGreeting);
+            io.to(roomId).emit("chat-message", aiGreeting);
+          }
+        } catch (err) {
+          console.error(
+            `AI welcome greeting error in room ${roomId}:`,
+            err.message || err
+          );
+        }
+      }, 3000); // Wait 3 seconds before greeting to let user settle in
+    }
+
+    // Get all messages for display (system notes are now generated dynamically for AI only)
+    const displayMessages = messagesByRoom[roomId] || [];
+
     // Emit initial room data (messages and users) to the joining socket
     socket.emit("roomData", {
-      messages: messagesByRoom[roomId] || [],
+      messages: displayMessages,
       users: usersByRoom[roomId] || [],
     });
 
     if (typeof callback === "function") {
       callback({
         success: true,
-        messages: messagesByRoom[roomId],
+        messages: displayMessages,
         userId,
         username,
         users: usersByRoom[roomId],
@@ -223,6 +474,94 @@ io.on("connection", (socket) => {
     messagesByRoom[msg.roomId].push(message);
     io.to(msg.roomId).emit("chat-message", message);
 
+    // Check if we need to generate a summary (every 10 real messages)
+    (async () => {
+      try {
+        // Count real messages (excluding AI messages)
+        const realMessages = messagesByRoom[msg.roomId].filter(
+          (m) => m.userId !== AI_OBSERVER_USERID
+        );
+
+        // Check if we should generate a summary
+        if (realMessages.length > 0 && realMessages.length % 10 === 0) {
+          console.log(
+            `Triggering summary generation for room ${msg.roomId} at ${realMessages.length} messages`
+          );
+
+          // Get or create conversation document
+          let conversation = await Conversation.findOne({ roomId: msg.roomId });
+          if (!conversation) {
+            conversation = new Conversation({
+              roomId: msg.roomId,
+              messages: [],
+            });
+            console.log(
+              `Created new conversation document for room ${msg.roomId}`
+            );
+          }
+
+          console.log(
+            `Current lastSummaryAt: ${conversation.lastSummaryAt}, realMessages.length: ${realMessages.length}`
+          );
+
+          // Only generate summary if we haven't already summarized these messages
+          if (realMessages.length > conversation.lastSummaryAt) {
+            // Get messages since last summary
+            const messagesToSummarize = realMessages.slice(
+              conversation.lastSummaryAt
+            );
+
+            console.log(`Messages to summarize: ${messagesToSummarize.length}`);
+
+            // Generate new summary
+            const newSummary = await generateConversationSummary(
+              messagesToSummarize,
+              msg.roomId
+            );
+
+            console.log(`Generated summary: "${newSummary}"`);
+
+            if (newSummary) {
+              // Combine with existing summary if any
+              let combinedSummary = newSummary;
+              if (conversation.summary) {
+                combinedSummary = `${conversation.summary} ${newSummary}`;
+                console.log(`Combined with existing summary`);
+              }
+
+              // Update conversation with new summary
+              conversation.summary = combinedSummary;
+              conversation.lastSummaryAt = realMessages.length;
+
+              console.log(
+                `Saving conversation with summary: "${combinedSummary.substring(
+                  0,
+                  100
+                )}..."`
+              );
+              await conversation.save();
+
+              console.log(`Summary successfully saved for room ${msg.roomId}`);
+            } else {
+              console.log(`No summary generated (empty result)`);
+            }
+          } else {
+            console.log(
+              `Skipping summary generation - already summarized up to ${conversation.lastSummaryAt}`
+            );
+          }
+        } else {
+          if (realMessages.length % 5 === 0) {
+            console.log(
+              `Real message count for room ${msg.roomId}: ${realMessages.length} (waiting for multiple of 10)`
+            );
+          }
+        }
+      } catch (err) {
+        console.error(`Error in summarization for room ${msg.roomId}:`, err);
+      }
+    })();
+
     // Explicit AI invocation: if message starts with @AI (case-insensitive)
     if (
       typeof msg.text === "string" &&
@@ -236,8 +575,8 @@ io.on("connection", (socket) => {
         const lastMsg = messages[messages.length - 1];
         if (lastMsg && lastMsg.userId === AI_OBSERVER_USERID) return;
         try {
-          const prompt = buildPrompt(messages, msg.roomId);
-          const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+          const prompt = await buildPrompt(messages, msg.roomId);
+          const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
           const result = await model.generateContent(prompt);
           const aiText =
             result?.response?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
@@ -252,6 +591,7 @@ io.on("connection", (socket) => {
               username: AI_OBSERVER_NAME,
               roomId: msg.roomId,
               text: aiText,
+              timestamp: new Date(),
             };
             messagesByRoom[msg.roomId].push(aiMsg);
             io.to(msg.roomId).emit("chat-message", aiMsg);
@@ -269,6 +609,11 @@ io.on("connection", (socket) => {
   socket.on("disconnect", async () => {
     const user = users[socket.id];
     const roomId = socketRoomMap[socket.id];
+
+    // Note: We don't generate "left the room" system notes for disconnects
+    // because closing a browser window just ends the session, it doesn't mean
+    // the user has left the room. They remain a participant and may return.
+
     // Save messages to MongoDB if roomId exists and messages exist
     if (roomId && messagesByRoom[roomId]) {
       let conversation = await Conversation.findOne({ roomId });
